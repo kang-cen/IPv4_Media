@@ -64,14 +64,13 @@ int main(int argc, char *argv[]) {
   int sd = 0;
   struct ip_mreqn mreq;     // group setting
   struct sockaddr_in laddr; // local address
-  uint64_t receive_buf_size = BUFSIZE;
+  // uint64_t receive_buf_size = BUFSIZE;
   int pd[2];
   pid_t pid;
   struct sockaddr_in server_addr;
   socklen_t serveraddr_len;
   int len;
   int chosenid;
-  int ret = 0;
   struct msg_channel_st *msg_channel;
   struct sockaddr_in raddr;
   socklen_t raddr_len;
@@ -118,7 +117,7 @@ int main(int argc, char *argv[]) {
   // local address(self)
   inet_pton(AF_INET, "0.0.0.0", &mreq.imr_address);
   // local net card
-  mreq.imr_ifindex = if_nametoindex("eth0");
+  mreq.imr_ifindex = if_nametoindex("ens33");
   if (setsockopt(sd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
     perror("setsockopt()");
     exit(1);
@@ -142,7 +141,7 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  pid =  ();
+  pid = fork();
   if (pid < 0) {
     perror("fork()");
     exit(1);
@@ -176,7 +175,7 @@ int main(int argc, char *argv[]) {
     while (1) {
       len = recvfrom(sd, msg_list, MSG_LIST_MAX, 0, (void *)&server_addr,//此处是收节目单
                      &serveraddr_len);
-      fprintf(stderr, "server_addr:%d\n", server_addr.sin_addr.s_addr);
+      fprintf(stderr, "server_addr: %s\n", inet_ntoa(server_addr.sin_addr));
       if (len < sizeof(struct msg_list_st)) {
         fprintf(stderr, "massage is too short.\n");
         continue;
@@ -186,6 +185,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "chnid is not match.\n");
         continue;
       }
+      else
+        fprintf(stderr, "chnid is mathced current chnid:%d.\n", msg_list->chnid);
+
       break;
     }
 
@@ -232,7 +234,8 @@ int main(int argc, char *argv[]) {
     uint32_t offset = 0;// 偏移量，追踪缓冲区中的当前位置
     memset(rcvbuf, 0, BUFSIZE);//清零接收缓冲区
     int bufct = 0; // 缓冲区计数器
-    while (1) {
+    while (1) 
+    {
       len = recvfrom(sd, msg_channel, MSG_CHANNEL_MAX, 0, (void *)&raddr, &raddr_len);//此处是收音频数据
       //防止有人恶意发送不相关的包
       if (raddr.sin_addr.s_addr != server_addr.sin_addr.s_addr) {
@@ -251,7 +254,8 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      if (msg_channel->chnid == chosenid) {
+      if (msg_channel->chnid == chosenid) 
+      {
         memcpy(rcvbuf + offset, msg_channel->data, len - sizeof(chnid_t));
         offset += len - sizeof(chnid_t);
 
@@ -262,6 +266,11 @@ int main(int argc, char *argv[]) {
           }
           offset = 0;
         }
+        // if (writen(pd[1], msg_channel->data, len - sizeof(chnid_t)) < 0) 
+        // {
+        // exit(1);
+        // }
+
       }
 
       //可以做一个缓冲机制，停顿1  2 秒，不采用接收一点播放一点

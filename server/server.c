@@ -8,6 +8,7 @@
 #include <netinet/ip.h>
 #include <signal.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -92,7 +93,7 @@ static int socket_init() {
     syslog(LOG_ERR, "socket():%s", strerror(errno));
     exit(1);
   }
-  if (setsockopt(serversd, IP1PROTO_IP, IP_MULTICAST_IF, &mreq, sizeof(mreq)) <
+  if (setsockopt(serversd, IPPROTO_IP, IP_MULTICAST_IF, &mreq, sizeof(mreq)) <
       0) {
     syslog(LOG_ERR, "setsockopt(IP_MULTICAST_IF):%s", strerror(errno));
     exit(1);
@@ -130,7 +131,8 @@ int main(int argc, char** argv) {
 /*命令行参数分析 */
   while(1) {
     c = getopt(argc, argv, "M:P:FD:I:H");
-    printf("get command c:%c\n", c);
+    if(isalpha(c))
+      printf("get command c:%c\n", c);
     if (c < 0) {
       break;
     }

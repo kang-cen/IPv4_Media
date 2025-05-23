@@ -2,7 +2,7 @@
 #define SERVER_CONF_H_
 
 #define DEFAULT_MEDIADIR "../medialib"
-#define DEFAULT_IF "eth0"
+#define DEFAULT_IF "ens33"
 
 enum
 {

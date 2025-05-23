@@ -35,7 +35,7 @@ static struct channel_context_st channel[MAXCHNID + 1]; // 全部的频道 保�
 
 // 将某个目录下的所有文件转为一个频道 
 static struct channel_context_st *path2entry(const char *path) {
-  syslog(LOG_INFO, "current path: %s\n", path);
+  syslog(LOG_INFO, "current path: %s", path);
   char pathstr[PATHSIZE] = {'\0'};//存储频道描述文件
   char linebuf[LINEBUFSIZE];
   FILE *fp;
@@ -48,7 +48,7 @@ static struct channel_context_st *path2entry(const char *path) {
   strcat(pathstr, path);
   strcat(pathstr, "/desc.txt");
   fp = fopen(pathstr, "r"); // 打开频道描述文件
-  syslog(LOG_INFO, "channel dir:%s\n", pathstr);
+  syslog(LOG_INFO, "channel dir:%s", pathstr);
   if (fp == NULL) {
     syslog(LOG_INFO, "%s is not a channel dir (can not find desc.txt)", path);
     return NULL;
@@ -112,15 +112,15 @@ int mlib_getchnlist(struct mlib_listentry_st **result, int *resnum) {
 
   snprintf(path, PATHSIZE, "%s/*", server_conf.media_dir);
 #ifdef DEBUG
-  printf("current path:%s\n", path);
+  syslog(LOG_INFO,"current path:%s", path);
 #endif
   if (glob(path, 0, NULL, &globres)) { // 成功返回0
     return -1;
   }
 #ifdef DEBUG
-  printf("globres.gl_pathv[0]:%s\n", globres.gl_pathv[0]);
-  printf("globres.gl_pathv[1]:%s\n", globres.gl_pathv[1]);
-  printf("globres.gl_pathv[2]:%s\n", globres.gl_pathv[2]);
+  syslog(LOG_INFO,"globres.gl_pathv[0]:%s", globres.gl_pathv[0]);
+  syslog(LOG_INFO,"globres.gl_pathv[1]:%s", globres.gl_pathv[1]);
+  syslog(LOG_INFO,"globres.gl_pathv[2]:%s", globres.gl_pathv[2]);
 #endif
   ptr = malloc(sizeof(struct mlib_listentry_st) * globres.gl_pathc);//函数最终要返回给调用者的频道列表，包含给客户端使用的频道信息
   if (ptr == NULL) {
@@ -131,7 +131,7 @@ int mlib_getchnlist(struct mlib_listentry_st **result, int *resnum) {
     //globres.gl_path[v]->"var/media/ch1"
     res = path2entry(globres.gl_pathv[i]);//调用path2entry检查其是否为有效频道 res用于临时存储由 path2entry() 函数返回的频道上下文信息
     if (res != NULL) {
-      syslog(LOG_INFO, "path2entry() return : %d %s.", res->chnid, res->desc);
+      syslog(LOG_INFO, "path2entry() return : %d %s", res->chnid, res->desc);
       memcpy(channel + res->chnid, res, sizeof(*res)); //channel + res->chnid === &channel[res->chnid]
       ptr[num].chnid = res->chnid;
       ptr[num].desc = strdup(res->desc);//数创建一个字符串的副本

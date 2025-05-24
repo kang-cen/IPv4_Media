@@ -1,3 +1,73 @@
+#include <getopt.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <fcntl.h>    // 包含 fcntl 函数和 F_GETFL、F_SETFL、O_NONBLOCK 等宏
+#include <unistd.h>
+//#include <proto.h>
+#include "../include/proto.h"
+#include "client.h"
+#include <arpa/inet.h>
+#include <errno.h>
+#include <error.h>
+#include <net/if.h>
+#include <string.h>
+#include <stdbool.h>
+/*
+-M --mgroup specify multicast group
+-P --port specify receive port
+-p --player specify player
+-H --help show help
+*/
+
+
+// 添加序列号跟踪
+static uint32_t expected_seq = 0;
+static bool first_packet = true;
+static int packet_loss_count = 0;
+
+
+struct client_conf_st client_conf = {.rcvport = DEFAULT_RCVPORT,
+                                     .mgroup = DEFAULT_MGROUP,
+                                     .player_cmd = DEFAULT_PLAYERCMD};
+
+static void print_help() {
+  printf("-P --port   specify receive port\n");
+  printf("-M --mgroup specify multicast group\n");
+  printf("-p --player specify player \n");
+  printf("-H --help   show help\n");
+}
+
+#define BUFSIZE 320*1024/8*8 // 定义缓冲区大小为 320KB
+
+/*write to fd len bytes data*/
+static int writen(int fd, const void *buf, size_t len) {
+    int count = 0;
+    int pos = 0;    
+    while (len > 0) {
+        count = write(fd, buf + pos, len);
+        if (count < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {//说明当前写缓冲区满了（在非阻塞模式下会返回）。
+                // 非阻塞模式下的正常情况
+                usleep(1000); // 短暂休眠
+                continue;
+            }
+            perror("write()");
+            return -1;
+        }
+        len -= count;
+        pos += count;
+    }
+    
+    return 0;
+}
+
 int main(int argc, char *argv[]) 
 {
 

@@ -38,7 +38,9 @@ static void *thr_list(void *p) {
   entrylistptr->chnid = LISTCHNID; // 这是节目单频道号 0
 
   entryptr = entrylistptr->entry;//将节目单的频道结构体的地址赋给频道结构体指针
+
   syslog(LOG_DEBUG, "num_list_entry:%d\n", num_list_entry);
+  
   for (int i = 0; i < num_list_entry; ++i) {
     size = sizeof(struct msg_listentry_st) + strlen(list_entry[i].desc);//size是一个频道的大小
 
@@ -49,7 +51,7 @@ static void *thr_list(void *p) {
     syslog(LOG_DEBUG, "entry[%d] len:%hu", i, ntohs(entryptr->len));
     entryptr = (void *)(((char *)entryptr) + size); // 向后移动entptr
 
-}
+  }
 
   while (1) {
     syslog(LOG_INFO, "thr_list sndaddr :%d\n", sndaddr.sin_addr.s_addr);//#include "server_conf.h"中声明了此处可以直接使用

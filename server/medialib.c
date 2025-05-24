@@ -15,7 +15,7 @@
 #include "mytbf.h"
 #include "server_conf.h"
 
-//#define DEBUG
+// #define DEBUG
 
 #define PATHSIZE 1024
 #define LINEBUFSIZE 1024
@@ -67,7 +67,7 @@ static struct channel_context_st *path2entry(const char *path) {
     return NULL;
   }
 
-  me->tbf = mytbf_init(MP3_BITRATE / 8, MP3_BITRATE / 8 * 5); // 初始化流控器  每天添加40Kbytes最多一次可以读取 200Kbytes
+  me->tbf = mytbf_init(MP3_BITRATE / 8, MP3_BITRATE / 8 * 5); // 初始化流控器  每次添加40Kbytes最多一次可以读取 200Kbytes
   if (me->tbf == NULL) {
     syslog(LOG_ERR, "mytbf_init():%s", strerror(errno));
     free(me);
@@ -190,7 +190,7 @@ ssize_t mlib_readchn(chnid_t chnid, void *buf, size_t size) {
   int next_ret = 0;
   // get token number
   tbfsize = mytbf_fetchtoken(channel[chnid].tbf, size);
-  syslog(LOG_INFO, "current tbf():%d", mytbf_checktoken(channel[chnid].tbf));//记录剩余的令牌数量到日志
+  syslog(LOG_INFO, "当前频道：%d 剩余令牌数量:%d", chnid,mytbf_checktoken(channel[chnid].tbf));//记录剩余的令牌数量到日志
 
   while (1) 
   {
@@ -217,7 +217,7 @@ ssize_t mlib_readchn(chnid_t chnid, void *buf, size_t size) {
       channel[chnid].offset += len;
       struct stat buf;
       fstat(channel[chnid].fd, &buf);
-      syslog(LOG_DEBUG, "epoch : %f%%",
+      syslog(LOG_DEBUG, "播放进度 : %f%%",
              (channel[chnid].offset) / (1.0*buf.st_size)*100);//计算并记录当前播放进度百分比
       break;
     }
@@ -225,6 +225,8 @@ ssize_t mlib_readchn(chnid_t chnid, void *buf, size_t size) {
   // remain some token
   if (tbfsize - len > 0)
     mytbf_returntoken(channel[chnid].tbf, tbfsize - len);
-  printf("current chnid :%d\n", chnid);
+  // printf("current chnid :%d\n", chnid);
+  syslog(LOG_INFO, "当前频道:%d\n", chnid);//记录剩余的令牌数量到日志
+
   return len; //返回读取到的长度
 }

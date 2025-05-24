@@ -1,60 +1,5 @@
-#include <getopt.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-//#include <proto.h>
-#include "../include/proto.h"
-#include "client.h"
-#include <arpa/inet.h>
-#include <errno.h>
-#include <error.h>
-#include <net/if.h>
-#include <string.h>
-
-/*
--M --mgroup specify multicast group
--P --port specify receive port
--p --player specify player
--H --help show help
-*/
-
-struct client_conf_st client_conf = {.rcvport = DEFAULT_RCVPORT,
-                                     .mgroup = DEFAULT_MGROUP,
-                                     .player_cmd = DEFAULT_PLAYERCMD};
-
-static void print_help() {
-  printf("-P --port   specify receive port\n");
-  printf("-M --mgroup specify multicast group\n");
-  printf("-p --player specify player \n");
-  printf("-H --help   show help\n");
-}
-
-#define BUFSIZE 320*1024/8*3 // 定义缓冲区大小为 120KB
-
-/*write to fd len bytes data*/
-static int writen(int fd, const void *buf, size_t len) {
-  int count = 0;
-  int pos = 0;
-  while (len > 0) {
-    count = write(fd, buf + pos, len);
-    if (count < 0) {
-      if (errno == EINTR)
-        continue;
-      perror("write()");
-      return -1;
-    }
-    len -= count;
-    pos += count;
-  }
-  return 0;
-}
-
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) 
+{
 
   /*
   initializing
@@ -129,6 +74,13 @@ int main(int argc, char *argv[]) {
     perror("setsockopt()");
     exit(1);
   }
+  int rcvbuf_size = 1024 * 1024; // 增加UDP接收缓冲区大小设置为1MB
+  if (setsockopt(sd, SOL_SOCKET, SO_RCVBUF, &rcvbuf_size, sizeof(rcvbuf_size)) < 0) {
+      perror("setsockopt SO_RCVBUF");
+      exit(1);
+  }
+
+
   laddr.sin_family = AF_INET;
   laddr.sin_port = htons(atoi(client_conf.rcvport));
   inet_pton(AF_INET, "0.0.0.0", &laddr.sin_addr);
@@ -140,7 +92,16 @@ int main(int argc, char *argv[]) {
     perror("pipe()");
     exit(1);
   }
-
+    // 设置管道属性  设置文件描述符为非阻塞模式 一旦内核缓冲区满了，write() 不会阻塞，而是立即返回错误 EAGAIN 或 EWOULDBLOCK。
+    int flags = fcntl(pd[1], F_GETFL);//使用 fcntl 获取 pd[1] 的文件状态标志（flags
+    if (flags != -1) {
+        fcntl(pd[1], F_SETFL, flags | O_NONBLOCK);
+    }
+    
+    #ifdef F_SETPIPE_SZ
+    fcntl(pd[1], F_SETPIPE_SZ, 1024 * 1024); // 1MB管道缓冲区
+    #endif
+    
   pid = fork();
   if (pid < 0) {
     perror("fork()");
@@ -155,14 +116,18 @@ int main(int argc, char *argv[]) {
     dup2(pd[0], 0); // set pd[0] as stdin / 将管道读端重定向到标准输入
     if (pd[0] > 0)  // close pd[0]
       close(pd[0]);
-    /*use shell to parse DEFAULT_PLAYERCMD, NULL means to end*/
-    execl("/bin/sh", "sh", "-c", client_conf.player_cmd, NULL);
-    perror("execl()");
+     // 启动音频播放器，添加更多容错参数
+    execl("/bin/sh", "sh", "-c", 
+          "mpg123 --quiet --buffer 1024 -", NULL);
+    // execl("/bin/sh", "sh", "-c", 
+    //       "mpg123  -", NULL);
+    perror("execl");
     exit(1);
   } 
   
   else // parent
   {
+    close(pd[0]);
     /*receive data from network, write it to pipe*/
     // receive programme
     struct msg_list_st *msg_list;
@@ -172,6 +137,7 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
     //必须从节目单开始
+    serveraddr_len=sizeof(server_addr);//为什么一定要这个？
     while (1) {
       len = recvfrom(sd, msg_list, MSG_LIST_MAX, 0, (void *)&server_addr,//此处是收节目单
                      &serveraddr_len);
@@ -233,7 +199,6 @@ int main(int argc, char *argv[]) {
     char rcvbuf[BUFSIZE];// 接收缓冲区数组
     uint32_t offset = 0;// 偏移量，追踪缓冲区中的当前位置
     memset(rcvbuf, 0, BUFSIZE);//清零接收缓冲区
-    int bufct = 0; // 缓冲区计数器
     while (1) 
     {
       len = recvfrom(sd, msg_channel, MSG_CHANNEL_MAX, 0, (void *)&raddr, &raddr_len);//此处是收音频数据
@@ -256,33 +221,50 @@ int main(int argc, char *argv[]) {
 
       if (msg_channel->chnid == chosenid) 
       {
-        memcpy(rcvbuf + offset, msg_channel->data, len - sizeof(chnid_t));
-        offset += len - sizeof(chnid_t);
 
-        if (bufct++ % 2 == 0) {
-          // 每接收两次数据，写入管道一次
-          if (writen(pd[1], rcvbuf, offset) < 0) {
-            exit(1);
+        // 检查序列号连续性
+          if (first_packet) {
+              expected_seq = msg_channel->seq + 1;
+              first_packet = false;
+          } 
+          else 
+          {
+              if (msg_channel->seq != expected_seq) {
+                  fprintf(stderr, "Warning: Sequence gap! Expected %u, got %u (lost %d packets)\n", 
+                          expected_seq, msg_channel->seq, 
+                          msg_channel->seq - expected_seq);
+                  packet_loss_count += (msg_channel->seq - expected_seq);
+                  
+                  // 对于音频流，可能需要插入静音数据来维持时序
+                  // 这里可以选择跳过这个包或者继续处理
+              }
+              expected_seq = msg_channel->seq + 1;
           }
-          offset = 0;
+        memcpy(rcvbuf + offset, msg_channel->data, len - sizeof(chnid_t)-sizeof(uint32_t));
+        offset += len - sizeof(chnid_t)-sizeof(uint32_t);
+
+        if (offset >= BUFSIZE / 2) { // 缓冲区达到一半时写入
+            fd_set wfds;//是 select 系统调用的文件描述符集合。
+            struct timeval tv = {0, 0};//设置 select 的超时时间为 0 秒 0 微秒，即非阻塞（立即返回）。
+            FD_ZERO(&wfds);
+            FD_SET(pd[1], &wfds);//FD_SET(fd, &set)：把文件描述符 fd 加入到集合 set 中。
+            if (select(pd[1] + 1, NULL, &wfds, NULL, &tv) > 0) {//select 是一个 I/O 多路复用函数，检查指定的文件描述符是否“就绪”。
+                if (writen(pd[1], rcvbuf, offset) < 0) {
+                    exit(1);
+                }
+                offset = 0;
+            } else {
+                fprintf(stderr, "Pipe not writable, skipping write\n");
+            }
         }
-        // if (writen(pd[1], msg_channel->data, len - sizeof(chnid_t)) < 0) 
-        // {
-        // exit(1);
-        // }
-
       }
-
-      //可以做一个缓冲机制，停顿1  2 秒，不采用接收一点播放一点
-      // if (msg_channel->chnid == chosenid) {
-      //  if (writen(pd[1], msg_channel->data, len - sizeof(chnid_t)) < 0) {
-      //    exit(1);
-      //  }
-      //}
+  
     }
 
     free(msg_channel);
     close(sd);
     exit(0);
+
   }
 }
+

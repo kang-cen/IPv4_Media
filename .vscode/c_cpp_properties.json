@@ -1,0 +1,31 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include",
+                "/usr/include/linux",
+                "/usr/include/x86_64-linux-gnu",
+                "/usr/include/x86_64-linux-gnu/sys",
+                "/usr/lib/gcc/x86_64-linux-gnu/*/include",
+                "/usr/local/include"
+            ],
+            "defines": [
+                "_GNU_SOURCE",
+                "__USE_GNU",
+                "_DEFAULT_SOURCE",
+                "_POSIX_C_SOURCE=200809L"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-Wall",
+                "-Wextra"
+            ]
+        }
+    ],
+    "version": 4
+}

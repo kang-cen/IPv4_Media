@@ -16,7 +16,7 @@
 #include "medialib.h"
 #include "server_conf.h"
 #include "../include/proto.h"
-
+// #include "reliablesender.h"
 static int tid_nextpos = 0;
 
 // 每一个线程负责一个频道 频道号 处理该频道的线程
@@ -29,29 +29,53 @@ struct thr_channel_entry_st thr_channel[CHANNUM];
 
 static void *thr_channel_snder(void *ptr)
 {
+  uint32_t sequence_number = 0; // 静态变量，保持递增
   struct msg_channel_st *sbufp;
   int len;
   struct mlib_listentry_st *entry = ptr;//void *-> struct mlib_listentry_st *
   sbufp = malloc(MSG_CHANNEL_MAX);
-  if (sbufp == NULL) {
+  if (sbufp == NULL) 
+  {
     syslog(LOG_ERR, "malloc():%s", strerror(errno));
     exit(1);
   }
-
   sbufp->chnid = entry->chnid; // 频道号处理
   // 频道内容读取
-  while(1) {
+  while(1) 
+  {
+    sbufp->seq=sequence_number;
+    syslog(LOG_INFO, "开始");
     len = mlib_readchn(entry->chnid, sbufp->data, 320*1024/8); // 320kbit/s
-    syslog(LOG_DEBUG, "mlib_readchn() len: %d", len);
-    if (len < 0) {
+    syslog(LOG_DEBUG, "读取的字节数: %d bytes", len);
+    if (len < 0) 
+    {
       break;
     }
-    if (sendto(serversd, sbufp, len + sizeof(chnid_t), 0, (void*)&sndaddr, sizeof(sndaddr)) < 0) {
+    if (sendto(serversd, sbufp, len + sizeof(chnid_t)+sizeof(uint32_t), 0, (void*)&sndaddr, sizeof(sndaddr)) < 0) {
       syslog(LOG_ERR, "thr_channel(%d):sendto():%s", entry->chnid,
              strerror(errno));
       break;
     }
+    // 记录日志
+    char time_str[64];
+    time_t now = time(NULL);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    syslog(LOG_INFO, "current channel :%d:[%s] Sent packet with sequence: %u, length: %zu\n",entry->chnid,time_str, sequence_number, 
+     sizeof(uint32_t) + sizeof(chnid_t) + len);
+
+    sequence_number++;
     sched_yield();//出让调度器
+    
+    // 替换你的发送部分
+    // struct channel_sender sender;
+    // sender_init(&sender, DEFAULT_MGROUP, DEFAULT_RCVPORT, entry->chnid, 320); // 320kbps
+    // // 在发送循环中
+    // if (send_audio_packet(&sender, sbufp, len) < 0) 
+    // {
+    //     syslog(LOG_ERR, "Failed to send packet for channel %d", entry->chnid);
+    //     break;
+    // }
+    // 移除 sched_yield() - 速率控制已内置
   }
   pthread_exit(NULL);
 }

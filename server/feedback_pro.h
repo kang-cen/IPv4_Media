@@ -7,7 +7,6 @@
 
 #define MAX_CLIENTS 1024 //系统支持的最大客户端数量限制
 #define CLIENT_TIMEOUT 30  // 客户端超时时间（秒）
-#define FEEDBACK_PORT_OFFSET 1  // 反馈端口 = 基础端口 + 1
 
 // 客户端状态信息  维护单个客户端的状态信息和反馈数据
 struct client_state {
@@ -35,7 +34,9 @@ extern struct channel_rate_control g_channel_rates[MAXCHNID + 1];
 // 函数声明
 int thr_feedback_create(void);
 int thr_feedback_destroy(void);
-
+static int create_log_file(void) ;
+static void log_feedback_data(uint32_t client_id, int32_t channel_id, uint32_t buffer_usage, 
+                             uint32_t timestamp, uint32_t seq_num, double rate_multiplier) ;
 // 获取指定频道的速率倍数
 double get_channel_rate_multiplier(chnid_t channel_id);
 

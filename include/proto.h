@@ -18,9 +18,7 @@
 #define MAX_ENTRY (MSG_CHANNEL_MAX - sizeof(chnid_t)) //节目单包的最大大小
 
 #define PACKET_MAGIC 0xABCD1234
-#define MAX_DATA_SIZE 1400  // 避免IP分片
-#define SEQUENCE_WINDOW 100 // 序列号窗口大小
-
+#define FEEDBACK_PORT_OFFSET 1
 #include "site_type.h"
 // 每一个频道内容结构体： 频道号，data(指针)
 struct msg_channel_st

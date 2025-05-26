@@ -22,12 +22,15 @@ void init_feedback_control(struct shared_data* shared) {
     shared->feedback_ctrl.ack_received = true; // 初始设为true，避免首次发送被阻塞
 }
 
-// 生成客户端ID（基于本地地址和端口）
-uint32_t generate_client_id(struct sockaddr_in* addr) {
+// 生成客户端ID（基于目的地址和端口）
+uint32_t generate_client_id(struct shared_data* shared) {
     // 简单的hash方法：IP地址XOR端口号
-    uint32_t ip = ntohl(addr->sin_addr.s_addr);
-    uint16_t port = ntohs(addr->sin_port);
-    return ip ^ port ;
+    struct sockaddr_in local_addr;
+    socklen_t len = sizeof(local_addr);
+    getsockname(shared->socket_fd, (struct sockaddr*)&local_addr, &len); // 获取客户端本地地址
+    uint32_t ip = ntohl(local_addr.sin_addr.s_addr); // 本地 IP
+    uint16_t port = ntohs(local_addr.sin_port); // 本地端口
+    return ip ^ port;
 
 }
 
@@ -52,22 +55,29 @@ int send_feedback_message(struct shared_data* shared, rate_control_level_t rate_
     // 构造反馈消息
     memset(&msg, 0, sizeof(msg));
     msg.magic = htonl(PACKET_MAGIC);
-    msg.client_id = htonl(generate_client_id(&shared->server_addr));
+    msg.client_id = htonl(generate_client_id(shared));
     msg.channel_id = htonl(shared->chosen_channel);
     msg.rate_level = htonl(rate_level);
     msg.buffer_usage = htonl(buffer_usage_percent);
     msg.timestamp = htonl((uint32_t)time(NULL));
     msg.seq_num = htonl(shared->feedback_ctrl.seq_counter++);
     
+
     // 发送UDP消息到服务器
+    struct sockaddr_in dest_addr;
+    memcpy(&dest_addr, &shared->server_addr, sizeof(dest_addr)); // 复制服务器地址
+
+    // 计算反馈端口
+    uint16_t feedback_port = (uint16_t)atoi(DEFAULT_RCVPORT) + FEEDBACK_PORT_OFFSET; // 计算反馈端口
+    dest_addr.sin_port = htons(feedback_port); // 设置为反馈端口，转换为网络字节序
+
+    // 发送反馈信息
     ret = sendto(shared->socket_fd, &msg, sizeof(msg), 0,
-                 (struct sockaddr*)&shared->server_addr, sizeof(shared->server_addr));
-    
+                (struct sockaddr*)&dest_addr, sizeof(dest_addr));
     if (ret < 0) {
         perror("sendto feedback message");
         return -1;
     }
-    
     // 更新发送记录
     shared->feedback_ctrl.last_sent_seq = msg.seq_num;
     shared->feedback_ctrl.last_rate_level = rate_level;

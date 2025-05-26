@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
@@ -20,8 +21,72 @@ static int feedback_socket = -1;
 static struct client_state clients[MAX_CLIENTS];// 客户端状态数组
 static pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;// 客户端数组互斥锁
 
+// 日志文件路径和锁
+static const char* LOG_FILE_PATH = "/tmp/serverlog.txt";
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // 全局速率控制数组
 struct channel_rate_control g_channel_rates[MAXCHNID + 1];// 频道速率控制数组
+
+// 创建日志目录和文件
+static int create_log_file(void) {
+    // 创建/tmp目录（通常已存在，但确保存在）
+    struct stat st = {0};
+    if (stat("/tmp", &st) == -1) {
+        if (mkdir("/tmp", 0755) == -1) {
+            syslog(LOG_ERR, "Failed to create /tmp directory: %s", strerror(errno));
+            return -1;
+        }
+    }
+    
+    // 检查日志文件是否存在，如果不存在则创建
+    FILE *fp = fopen(LOG_FILE_PATH, "a");
+    if (fp == NULL) {
+        syslog(LOG_ERR, "Failed to create/open log file %s: %s", LOG_FILE_PATH, strerror(errno));
+        return -1;
+    }
+    
+    // 写入文件头（如果文件是新创建的）
+    fseek(fp, 0, SEEK_END);
+    if (ftell(fp) == 0) {
+        fprintf(fp, "# Server Feedback Log Started at %s", ctime(&(time_t){time(NULL)}));
+        fprintf(fp, "# Format: [Timestamp] Client_ID=uint Channel_ID=int Buffer_Usage=uint%% Seq_Num=uint Rate_Multiplier=float\n");
+        fprintf(fp, "# ========================================\n");
+    }
+    
+    fclose(fp);
+    syslog(LOG_INFO, "Log file %s initialized successfully", LOG_FILE_PATH);
+    return 0;
+}
+
+// 记录反馈数据到文件
+static void log_feedback_data(uint32_t client_id, int32_t channel_id, uint32_t buffer_usage, 
+                             uint32_t timestamp, uint32_t seq_num, double rate_multiplier) {
+    pthread_mutex_lock(&log_mutex);
+    
+    FILE *fp = fopen(LOG_FILE_PATH, "a");
+    if (fp == NULL) {
+        syslog(LOG_ERR, "Failed to open log file %s: %s", LOG_FILE_PATH, strerror(errno));
+        pthread_mutex_unlock(&log_mutex);
+        return;
+    }
+    
+    // 获取当前时间字符串
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+    
+    // 写入日志数据
+    fprintf(fp, "[%s] Client_ID=%u Channel_ID=%d Buffer_Usage=%u%% Timestamp=%u Seq_Num=%u Rate_Multiplier=%.3f\n",
+            time_str, client_id, channel_id, buffer_usage, timestamp, seq_num, rate_multiplier);
+    
+    // 刷新缓冲区确保数据写入
+    fflush(fp);
+    fclose(fp);
+    
+    pthread_mutex_unlock(&log_mutex);
+}
 
 // 初始化速率控制数组
 static void init_channel_rates(void) {
@@ -139,8 +204,14 @@ static void process_feedback_msg(struct feedback_msg *msg, struct sockaddr_in *c
     // 更新频道速率控制
     update_channel_rate_control(channel_id, msg->rate_level, client_id);
 
-    syslog(LOG_DEBUG, "Feedback from client %u: channel=%d, rate_level=%d, buffer=%u%%", 
-           client_id, channel_id, msg->rate_level, buffer_usage);
+    // 获取更新后的速率倍数用于记录
+    double current_rate_multiplier = get_channel_rate_multiplier(channel_id);
+    
+    // 记录数据到日志文件
+    log_feedback_data(client_id, channel_id, buffer_usage, timestamp, seq_num, current_rate_multiplier);
+
+    syslog(LOG_DEBUG, "Feedback from client %u: channel=%d, rate_level=%d, buffer=%u%%, rate_multiplier=%.3f", 
+           client_id, channel_id, msg->rate_level, buffer_usage, current_rate_multiplier);
 }
 
 // 反馈接收线程主函数
@@ -178,7 +249,7 @@ static void* feedback_thread(void *arg) {
         close(feedback_socket);
         return NULL;
     }
-
+    // 在feedback_thread函数中bind成功后添加
     syslog(LOG_INFO, "Feedback receiver listening on port %d", feedback_port);
 
     // 主接收循环
@@ -198,7 +269,6 @@ static void* feedback_thread(void *arg) {
                    recv_len, inet_ntoa(client_addr.sin_addr));
             continue;
         }
-
         // 处理反馈消息
         process_feedback_msg(&msg, &client_addr);
         
@@ -216,6 +286,12 @@ static void* feedback_thread(void *arg) {
 
 // 创建反馈接收线程
 int thr_feedback_create(void) {
+    // 初始化日志文件
+    if (create_log_file() != 0) {
+        syslog(LOG_ERR, "Failed to initialize log file");
+        return -1;
+    }
+    
     init_channel_rates();
     
     // 初始化客户端数组
@@ -243,6 +319,9 @@ int thr_feedback_destroy(void) {
     pthread_join(feedback_tid, NULL);
     
     cleanup_channel_rates();
+    
+    // 清理日志互斥锁
+    pthread_mutex_destroy(&log_mutex);
     
     syslog(LOG_INFO, "Feedback thread destroyed");
     return 0;

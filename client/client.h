@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
+#include <proto.h>
+
 struct client_conf_st
 {
   char *rcvport; // for local using
@@ -18,6 +20,15 @@ struct client_conf_st
 // 环形缓冲区结构
 #define RING_BUFFER_SIZE (2 * 1024 * 1024) // 2MB环形缓冲区大小
 
+
+struct feedback_control {
+    volatile bool enabled;           // 是否启用反馈控制
+    volatile uint32_t seq_counter;   // 序列号计数器
+    volatile uint32_t last_sent_seq; // 最后发送的序列号
+    volatile rate_control_level_t last_rate_level; // 上次发送的速率等级
+    volatile uint32_t retry_count;   // 重试计数
+    volatile bool ack_received;      // 是否收到确认（如果服务器支持）
+};
 struct ring_buffer {
     char data[RING_BUFFER_SIZE];      // 实际存储音频数据的缓冲区数组
                                       // 使用char数组便于按字节操作
@@ -84,6 +95,8 @@ struct shared_data {
     
     volatile long bytes_written;      // 已写入的字节总数
                                       // 用于计算处理吞吐量
+    // 在 struct shared_data 中添加：
+    struct feedback_control feedback_ctrl;  // 反馈控制数据
 };
 
 

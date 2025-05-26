@@ -47,14 +47,25 @@ struct msg_list_st
 }__attribute__((packed)); // do not align
 
 
-// 数据包头部结构
-struct packet_header {
-    uint32_t magic;        // 魔数，用于验证包的有效性 0xABCD1234
-    uint32_t sequence;     // 序列号
-    uint32_t timestamp;    // 时间戳（毫秒）
-    uint16_t channel_id;   // 频道ID
-    uint16_t data_len;     // 数据长度
-    uint32_t checksum;     // 校验和
+// 反馈控制相关的枚举和结构
+typedef enum {
+    RATE_INCREASE,      // Buffer usage < 25%: 提高速率
+    RATE_NORMAL,        // 25% <= Buffer usage <= 50%: 正常速率  
+    RATE_MODERATE_DEC,  // 50% < Buffer usage <= 75%: 适度降低速率
+    RATE_MAJOR_DEC      // Buffer usage > 75%: 大幅降低速率
+} rate_control_level_t;
+
+
+// 反馈消息结构体
+struct feedback_msg {
+    uint32_t magic;           // 魔数，用于验证消息类型
+    uint32_t client_id;       // 客户端ID（可以用IP+端口生成）
+    int32_t channel_id;       // 当前收听的频道ID
+    rate_control_level_t rate_level;  // 请求的速率控制等级
+    uint32_t buffer_usage;    // 当前缓冲区使用率百分比
+    uint32_t timestamp;       // 时间戳，用于重复检测
+    uint32_t seq_num;         // 序列号，用于确认机制
 } __attribute__((packed));
+
 
 #endif // PROTO_H_

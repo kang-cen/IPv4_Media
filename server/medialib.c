@@ -19,7 +19,7 @@
 
 #define PATHSIZE 1024
 #define LINEBUFSIZE 1024
-#define MP3_BITRATE 320 * 1024 // 比特率（Bitrate）320 kbps 是 MP3 的最高标准比特率
+#define MP3_BITRATE 224 * 1000 
 
 struct channel_context_st {
   chnid_t chnid;

@@ -115,11 +115,11 @@ void* feedback_thread(void* arg) {
         if (current_rate_level != last_reported_level) {
             current_send_interval = 1; // 变化时立即发送
         } else if (current_rate_level == RATE_MAJOR_DEC) {
-            current_send_interval = 2; // 每2秒发送
+            current_send_interval = 1; // 每秒发送
         } else if (current_rate_level == RATE_MODERATE_DEC) {
-            current_send_interval = 3; // 每3秒发送
+            current_send_interval = 2; // 每2秒发送
         } else {
-            current_send_interval = 5; // 每5秒发送
+            current_send_interval = 3; // 每3秒发送
         }
         
         // 检查是否到达发送时间

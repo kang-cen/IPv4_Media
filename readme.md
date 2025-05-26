@@ -19,3 +19,4 @@
 ## 注意事项
     所有的test.c文件都是自己测试某个知识点的
     nest_flexiblearraytest.c 用于测试可变数组的嵌套问题
+    syslog(LOG_DEBUG, "Channel %d rate multiplier updated to %.2f (level=%d)", 

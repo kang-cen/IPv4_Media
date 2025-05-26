@@ -49,9 +49,9 @@ static double calculate_rate_multiplier(rate_control_level_t rate_level) {
         case RATE_NORMAL:
             return 1.0;  // 正常速率
         case RATE_MODERATE_DEC:
-            return 0.8;  // 降低20%
+            return 0.6;  // 降低40% 延迟2s
         case RATE_MAJOR_DEC:
-            return 0.6;  // 降低40%
+            return 0.3;  // 降低70% 延迟4s
         default:
             return 1.0;
     }
@@ -322,11 +322,11 @@ void update_channel_rate_control(chnid_t channel_id, rate_control_level_t rate_l
     rate_ctrl->rate_multiplier = alpha * new_multiplier + (1 - alpha) * rate_ctrl->rate_multiplier;
     
     // 限制速率倍数范围
-    if (rate_ctrl->rate_multiplier < 0.5) {
-        rate_ctrl->rate_multiplier = 0.5;
-    } else if (rate_ctrl->rate_multiplier > 2.0) {
-        rate_ctrl->rate_multiplier = 2.0;
-    }
+    // if (rate_ctrl->rate_multiplier < 0.5) {
+    //     rate_ctrl->rate_multiplier = 0.5;
+    // } else if (rate_ctrl->rate_multiplier > 2.0) {
+    //     rate_ctrl->rate_multiplier = 2.0;
+    // }
     rate_ctrl->avg_rate_level = rate_level;
     rate_ctrl->last_update = time(NULL);
     

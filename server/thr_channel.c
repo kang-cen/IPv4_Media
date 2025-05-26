@@ -38,7 +38,7 @@ static void *thr_channel_snder(void *ptr)
   struct mlib_listentry_st *entry = ptr;
   struct timespec sleep_time;
   long sleep_ns;
-  const int BASE_BITRATE = 320 * 1024; // 320kbps
+  const int BASE_BITRATE = 224 * 1000; // 
   
   sbufp = malloc(MSG_CHANNEL_MAX);
   if (sbufp == NULL) 
@@ -55,7 +55,7 @@ static void *thr_channel_snder(void *ptr)
     sbufp->seq = sequence_number;
     
     // 读取数据 - 使用令牌桶控制
-    len = mlib_readchn(entry->chnid, sbufp->data, BASE_BITRATE/8); // 40KB
+    len = mlib_readchn(entry->chnid, sbufp->data, BASE_BITRATE/8); // 28KB
     if (len < 0) 
     {
       syslog(LOG_ERR, "Channel %d read failed", entry->chnid);

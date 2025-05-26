@@ -22,6 +22,7 @@
 #include "server_conf.h"
 #include "thr_channel.h"
 #include "thr_list.h"
+#include "feedback_pro.h"
 
 int serversd;
 struct sockaddr_in sndaddr;
@@ -43,6 +44,7 @@ static void print_help() {
 
 // 守护进程退出
 static void daemon_exit(int s) {
+  thr_feedback_destroy(); 
   thr_list_destroy();
   thr_channel_destroyall();
   mlib_freechnlist(list);
@@ -204,6 +206,14 @@ int main(int argc, char** argv) {
     }
   }
   syslog(LOG_DEBUG, "%d channel threads created.", i);
+
+  /*create feedback receiver thread*/  // 添加这部分
+  err = thr_feedback_create();
+  if (err) {
+    syslog(LOG_ERR, "thr_feedback_create():%s", strerror(err));
+    exit(1);
+  }
+  syslog(LOG_INFO, "Feedback receiver thread created.");
   while (1)
     pause();
 }

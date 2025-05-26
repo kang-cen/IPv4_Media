@@ -16,7 +16,9 @@
 #include "medialib.h"
 #include "server_conf.h"
 #include "../include/proto.h"
-// #include "reliablesender.h"
+#include "feedback_pro.h"
+#include <time.h>
+
 static int tid_nextpos = 0;
 
 // 每一个线程负责一个频道 频道号 处理该频道的线程
@@ -27,56 +29,79 @@ struct thr_channel_entry_st {
 
 struct thr_channel_entry_st thr_channel[CHANNUM];
 
+
 static void *thr_channel_snder(void *ptr)
 {
-  uint32_t sequence_number = 0; // 静态变量，保持递增
+  uint32_t sequence_number = 0;
   struct msg_channel_st *sbufp;
   int len;
-  struct mlib_listentry_st *entry = ptr;//void *-> struct mlib_listentry_st *
+  struct mlib_listentry_st *entry = ptr;
+  struct timespec sleep_time;
+  long sleep_ns;
+  const int BASE_BITRATE = 320 * 1024; // 320kbps
+  
   sbufp = malloc(MSG_CHANNEL_MAX);
   if (sbufp == NULL) 
   {
     syslog(LOG_ERR, "malloc():%s", strerror(errno));
     exit(1);
   }
-  sbufp->chnid = entry->chnid; // 频道号处理
-  // 频道内容读取
+  sbufp->chnid = entry->chnid;
+  
+  syslog(LOG_INFO, "Channel %d sender thread started", entry->chnid);
+  
   while(1) 
   {
-    sbufp->seq=sequence_number;
-    syslog(LOG_INFO, "开始");
-    len = mlib_readchn(entry->chnid, sbufp->data, 320*1024/8); // 320kbit/s
-    syslog(LOG_DEBUG, "读取的字节数: %d bytes", len);
+    sbufp->seq = sequence_number;
+    
+    // 读取数据 - 使用令牌桶控制
+    len = mlib_readchn(entry->chnid, sbufp->data, BASE_BITRATE/8); // 40KB
     if (len < 0) 
     {
+      syslog(LOG_ERR, "Channel %d read failed", entry->chnid);
       break;
     }
-    if (sendto(serversd, sbufp, len + sizeof(chnid_t)+sizeof(uint32_t), 0, (void*)&sndaddr, sizeof(sndaddr)) < 0) {
-      syslog(LOG_ERR, "thr_channel(%d):sendto():%s", entry->chnid,
-             strerror(errno));
-      break;
+    if (len == 0) {
+      // 文件结束，继续循环等待下一个文件
+      continue;
     }
-    // 记录日志
-    char time_str[64];
-    time_t now = time(NULL);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    syslog(LOG_INFO, "current channel :%d:[%s] Sent packet with sequence: %u, length: %zu\n",entry->chnid,time_str, sequence_number, 
-     sizeof(uint32_t) + sizeof(chnid_t) + len);
-
-    sequence_number++;
-    sched_yield();//出让调度器
     
-    // 替换你的发送部分
-    // struct channel_sender sender;
-    // sender_init(&sender, DEFAULT_MGROUP, DEFAULT_RCVPORT, entry->chnid, 320); // 320kbps
-    // // 在发送循环中
-    // if (send_audio_packet(&sender, sbufp, len) < 0) 
-    // {
-    //     syslog(LOG_ERR, "Failed to send packet for channel %d", entry->chnid);
-    //     break;
-    // }
-    // 移除 sched_yield() - 速率控制已内置
+    // 发送数据包
+    if (sendto(serversd, sbufp, len + sizeof(chnid_t) + sizeof(uint32_t), 0, 
+               (void*)&sndaddr, sizeof(sndaddr)) < 0) {
+      syslog(LOG_ERR, "Channel %d sendto():%s", entry->chnid, strerror(errno));
+      break;
+    }
+    
+    // 记录发送日志
+    syslog(LOG_DEBUG, "Channel %d: Sent packet seq=%u, len=%d", 
+           entry->chnid, sequence_number, len);
+    
+    sequence_number++;
+    
+    // 根据反馈动态调整发送速率
+    sleep_ns = get_channel_sleep_ns(entry->chnid, BASE_BITRATE);
+    
+    // 转换为 timespec 结构
+    sleep_time.tv_sec = sleep_ns / 1000000000L;
+    sleep_time.tv_nsec = sleep_ns % 1000000000L;
+    
+    // 精确睡眠控制发送速率
+    if (nanosleep(&sleep_time, NULL) < 0) {
+      if (errno != EINTR) {
+        syslog(LOG_WARNING, "Channel %d nanosleep():%s", entry->chnid, strerror(errno));
+      }
+    }
+    
+    // 记录当前速率倍数（调试用）
+    double rate_multiplier = get_channel_rate_multiplier(entry->chnid);
+    if (sequence_number % 100 == 0) {  // 每100个包记录一次
+      syslog(LOG_DEBUG, "Channel %d: rate_multiplier=%.2f, sleep_ns=%ld", 
+             entry->chnid, rate_multiplier, sleep_ns);
+    }
   }
+  
+  free(sbufp);
   pthread_exit(NULL);
 }
 

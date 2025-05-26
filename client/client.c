@@ -21,6 +21,8 @@
 #include "recv_thr.h"
 #include "writer_thr.h"
 #include "stat_thr.h"
+#include "feedback_thr.h"  
+
 
 /*
 -M --mgroup specify multicast group
@@ -65,7 +67,7 @@ int main(int argc, char *argv[]) {
     struct msg_list_st *msg_list;
     
     // 线程变量
-    pthread_t receiver_tid, writer_tid, stats_tid;
+    pthread_t receiver_tid, writer_tid, stats_tid,feedback_tid;
     struct shared_data shared_data = {0};
     
     struct option argarr[] = {{"port", 1, NULL, 'P'},
@@ -147,9 +149,9 @@ int main(int argc, char *argv[]) {
         fcntl(pd[1], F_SETFL, flags | O_NONBLOCK);
     }
     
-#ifdef F_SETPIPE_SZ
-    fcntl(pd[1], F_SETPIPE_SZ, 1024 * 1024); // 1MB管道缓冲区
-#endif
+    #ifdef F_SETPIPE_SZ
+        fcntl(pd[1], F_SETPIPE_SZ, 1024 * 1024); // 1MB管道缓冲区
+    #endif
     
     // 接收节目单
     msg_list = malloc(MSG_LIST_MAX);
@@ -246,14 +248,19 @@ int main(int argc, char *argv[]) {
             perror("pthread_create stats");
             exit(1);
         }
-        
+
+        // 创建反馈控制线程
+        if (pthread_create(&feedback_tid, NULL, feedback_thread, &shared_data) != 0) {
+            perror("pthread_create feedback");
+            exit(1);
+        }
         printf("All threads started. Press Ctrl+C to exit.\n");
         
         // 等待线程结束（通常通过信号处理）
         pthread_join(receiver_tid, NULL);
         pthread_join(writer_tid, NULL);
         pthread_join(stats_tid, NULL);
-        
+        pthread_join(feedback_tid, NULL);
         close(sd);
         close(pd[1]);
     }

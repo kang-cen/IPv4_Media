@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "../include/proto.h"
 #include "medialib.h"
@@ -54,7 +55,7 @@ static void *thr_list(void *p) {
   }
 
   while (1) {
-    syslog(LOG_INFO, "thr_list sndaddr :%d\n", sndaddr.sin_addr.s_addr);//#include "server_conf.h"中声明了此处可以直接使用
+    syslog(LOG_INFO, "thr_list sndaddr :%s\n", inet_ntoa(sndaddr.sin_addr));
     ret = sendto(serversd, entrylistptr, totalsize, 0, (void *)&sndaddr,
                  sizeof(sndaddr)); // 频道列表在广播网段每秒发送entrylist
     syslog(LOG_DEBUG, "sent content len:%d\n", entrylistptr->entry->len);

@@ -34,9 +34,10 @@ int ring_buffer_write(struct ring_buffer *rb, const void *data, size_t len) {
     while (rb->count + len > RING_BUFFER_SIZE) {  //rb->count 当前缓冲区中的数据字节数
       /*pthread_cond_timedwait 是 POSIX 线程库（pthreads）中用于条件变量的函数，带有超时功能。
       它的作用是：
-      等待一个条件变量（rb->not_full）满足，同时自动解锁互斥锁（rb->mutex）；
-      如果条件变量在超时时间（timeout）内被唤醒，就继续执行；
-      如果超时了还没被唤醒，则返回超时错误。
+        会自动释放 mutex 并挂起线程等待 cond 被唤醒；
+        如果在 abstime 时间之前被其他线程 pthread_cond_signal() 或 pthread_cond_broadcast() 唤醒，就重新加锁并继续；
+        如果到时间了还没唤醒，返回 ETIMEDOUT 错误（值通常是 110）；
+        你这里用了 != 0 来判断是否超时，是合理的简化用法（因为只有一种错误是你关心的）。
       */
         if (pthread_cond_timedwait(&rb->not_full, &rb->mutex, &timeout) != 0) {
             pthread_mutex_unlock(&rb->mutex);

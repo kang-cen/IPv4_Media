@@ -194,7 +194,7 @@ static void process_feedback_msg(struct feedback_msg *msg, struct sockaddr_in *c
 
     // 更新客户端状态
     client->channel_id = channel_id;
-    client->last_rate_level = msg->rate_level;
+    client->last_rate_level = ntohl(msg->rate_level);
     client->last_seq_num = seq_num;
     client->last_timestamp = timestamp;
     client->last_update = time(NULL);
@@ -202,16 +202,16 @@ static void process_feedback_msg(struct feedback_msg *msg, struct sockaddr_in *c
     pthread_mutex_unlock(&clients_mutex);
 
     // 更新频道速率控制
-    update_channel_rate_control(channel_id, msg->rate_level, client_id);
+    update_channel_rate_control(channel_id, ntohl(msg->rate_level), client_id);
 
     // 获取更新后的速率倍数用于记录
     double current_rate_multiplier = get_channel_rate_multiplier(channel_id);
     
     // 记录数据到日志文件
-    log_feedback_data(client_id, channel_id, buffer_usage, timestamp, seq_num, current_rate_multiplier);
+    // log_feedback_data(client_id, channel_id, buffer_usage, timestamp, seq_num, current_rate_multiplier);
 
-    syslog(LOG_DEBUG, "Feedback from client %u: channel=%d, rate_level=%d, buffer=%u%%, rate_multiplier=%.3f", 
-           client_id, channel_id, msg->rate_level, buffer_usage, current_rate_multiplier);
+    syslog(LOG_DEBUG, "Feedback from client %u: channel=%d, rate_level=%u, buffer=%u%%, rate_multiplier=%.3f", 
+           client_id, channel_id, ntohl(msg->rate_level), buffer_usage, current_rate_multiplier);
 }
 
 // 反馈接收线程主函数
@@ -287,12 +287,12 @@ static void* feedback_thread(void *arg) {
 // 创建反馈接收线程
 int thr_feedback_create(void) {
     // 初始化日志文件
-    if (create_log_file() != 0) {
-        syslog(LOG_ERR, "Failed to initialize log file");
-        return -1;
-    }
+    // if (create_log_file() != 0) {
+    //     syslog(LOG_ERR, "Failed to initialize log file");
+    //     return -1;
+    // }
     
-    init_channel_rates();
+    // init_channel_rates();
     
     // 初始化客户端数组
     memset(clients, 0, sizeof(clients));
@@ -395,6 +395,7 @@ void update_channel_rate_control(chnid_t channel_id, rate_control_level_t rate_l
     
     // 简单的平均算法：根据新的反馈调整速率倍数
     double new_multiplier = calculate_rate_multiplier(rate_level);
+
     
     // 使用指数移动平均来平滑速率变化
     double alpha = 0.3;  // 平滑因子

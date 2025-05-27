@@ -18,6 +18,9 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <sys/time.h>
+#include <signal.h>
+#include <ifaddrs.h>
+#include <sys/wait.h>
 #include "recv_thr.h"
 #include "writer_thr.h"
 #include "stat_thr.h"
@@ -34,11 +37,68 @@ struct client_conf_st client_conf = {.rcvport = DEFAULT_RCVPORT,
                                      .mgroup = DEFAULT_MGROUP,
                                      .player_cmd = DEFAULT_PLAYERCMD};
 
+// 全局变量用于线程间通信
+static struct shared_data *g_shared_data = NULL;
+static pthread_t receiver_tid, writer_tid, stats_tid, feedback_tid;
+static pid_t player_pid = 0;
+
 static void print_help() {
     printf("-P --port   specify receive port\n");
     printf("-M --mgroup specify multicast group\n");
     printf("-p --player specify player \n");
     printf("-H --help   show help\n");
+}
+
+// 信号处理函数
+void signal_handler(int sig) {
+    printf("\nReceived signal %d. Shutting down gracefully...\n", sig);
+    
+    if (g_shared_data) {
+        g_shared_data->stop_flag = true;
+        
+        // 唤醒可能阻塞的线程
+        pthread_cond_broadcast(&g_shared_data->rb.not_empty);
+        pthread_cond_broadcast(&g_shared_data->rb.not_full);
+    }
+    
+    // 如果有播放器子进程，也要终止它
+    if (player_pid > 0) {
+        kill(player_pid, SIGTERM);
+    }
+}
+
+// 获取第一个非回环网络接口名称
+char* get_default_interface() {
+    struct ifaddrs *ifaddrs_ptr, *ifa;
+    static char interface_name[IF_NAMESIZE];
+    
+    if (getifaddrs(&ifaddrs_ptr) == -1) {
+        perror("getifaddrs");
+        return NULL;
+    }
+    
+    // 遍历网络接口
+    for (ifa = ifaddrs_ptr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL) continue;
+        
+        // 检查是否为IPv4接口且不是回环接口
+        if (ifa->ifa_addr->sa_family == AF_INET &&
+            !(ifa->ifa_flags & IFF_LOOPBACK) &&
+            (ifa->ifa_flags & IFF_UP) &&
+            (ifa->ifa_flags & IFF_RUNNING)) {
+            
+            strncpy(interface_name, ifa->ifa_name, IF_NAMESIZE - 1);
+            interface_name[IF_NAMESIZE - 1] = '\0';
+            freeifaddrs(ifaddrs_ptr);
+            printf("Using network interface: %s\n", interface_name);
+            return interface_name;
+        }
+    }
+    
+    freeifaddrs(ifaddrs_ptr);
+    printf("Warning: No suitable network interface found, using default 'eth0'\n");
+    strcpy(interface_name, "eth0");
+    return interface_name;
 }
 
 // 初始化环形缓冲区
@@ -52,6 +112,41 @@ void ring_buffer_init(struct ring_buffer *rb) {
     pthread_cond_init(&rb->not_full, NULL);
 }
 
+// 清理资源
+void cleanup_resources() {
+    printf("Cleaning up resources...\n");
+    
+    if (g_shared_data) {
+        // 等待所有线程结束
+        if (pthread_join(receiver_tid, NULL) == 0) {
+            printf("Receiver thread joined\n");
+        }
+        if (pthread_join(writer_tid, NULL) == 0) {
+            printf("Writer thread joined\n");
+        }
+        if (pthread_join(stats_tid, NULL) == 0) {
+            printf("Stats thread joined\n");
+        }
+        if (pthread_join(feedback_tid, NULL) == 0) {
+            printf("Feedback thread joined\n");
+        }
+        
+        // 销毁互斥量和条件变量
+        pthread_mutex_destroy(&g_shared_data->rb.mutex);
+        pthread_cond_destroy(&g_shared_data->rb.not_empty);
+        pthread_cond_destroy(&g_shared_data->rb.not_full);
+        
+        // 关闭文件描述符
+        if (g_shared_data->socket_fd > 0) {
+            close(g_shared_data->socket_fd);
+        }
+        if (g_shared_data->pipe_fd > 0) {
+            close(g_shared_data->pipe_fd);
+        }
+    }
+    
+    printf("Cleanup completed\n");
+}
 
 int main(int argc, char *argv[]) {
     int index = 0;
@@ -65,10 +160,16 @@ int main(int argc, char *argv[]) {
     int len;
     int chosenid;
     struct msg_list_st *msg_list;
+    char *interface_name;
     
     // 线程变量
-    pthread_t receiver_tid, writer_tid, stats_tid,feedback_tid;
     struct shared_data shared_data = {0};
+    g_shared_data = &shared_data;  // 设置全局指针
+    
+    // 注册信号处理函数
+    signal(SIGINT, signal_handler);   // Ctrl+C
+    signal(SIGTERM, signal_handler);  // 终止信号
+    signal(SIGPIPE, SIG_IGN);         // 忽略管道破裂信号
     
     struct option argarr[] = {{"port", 1, NULL, 'P'},
                               {"mgroup", 1, NULL, 'M'},
@@ -106,10 +207,23 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
+    // 获取默认网络接口
+    interface_name = get_default_interface();
+    if (!interface_name) {
+        fprintf(stderr, "Failed to get network interface\n");
+        exit(1);
+    }
+    
     // 设置组播
     inet_pton(AF_INET, client_conf.mgroup, &mreq.imr_multiaddr);
     inet_pton(AF_INET, "0.0.0.0", &mreq.imr_address);
-    mreq.imr_ifindex = if_nametoindex("ens33");
+    mreq.imr_ifindex = if_nametoindex(interface_name);
+    if (mreq.imr_ifindex == 0) {
+        perror("if_nametoindex");
+        fprintf(stderr, "Failed to get interface index for %s\n", interface_name);
+        exit(1);
+    }
+    
     if (setsockopt(sd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
         perror("setsockopt IP_ADD_MEMBERSHIP");
         exit(1);
@@ -165,6 +279,13 @@ int main(int argc, char *argv[]) {
         len = recvfrom(sd, msg_list, MSG_LIST_MAX, 0, (void *)&server_addr, &serveraddr_len);
         fprintf(stderr, "server_addr: %s\n", inet_ntoa(server_addr.sin_addr));
         
+        if (shared_data.stop_flag) {
+            printf("Received stop signal during channel list reception\n");
+            free(msg_list);
+            close(sd);
+            exit(0);
+        }
+        
         if (len < sizeof(struct msg_list_st)) {
             fprintf(stderr, "message is too short.\n");
             continue;
@@ -190,6 +311,12 @@ int main(int argc, char *argv[]) {
     // 选择频道
     printf("请输入您想要的频道号: ");
     while (scanf("%d", &chosenid) != 1) {
+        if (shared_data.stop_flag) {
+            printf("Received stop signal during input\n");
+            free(msg_list);
+            close(sd);
+            exit(0);
+        }
         while (getchar() != '\n');
         printf("输入无效！请重新输入一个整数频道号: ");
     }
@@ -221,6 +348,7 @@ int main(int argc, char *argv[]) {
         perror("execl");
         exit(1);
     } else { // 父进程
+        player_pid = pid;  // 保存播放器进程ID
         close(pd[0]);
         
         // 初始化共享数据
@@ -235,23 +363,27 @@ int main(int argc, char *argv[]) {
         // 创建线程 UDP接受数据线程
         if (pthread_create(&receiver_tid, NULL, receiver_thread, &shared_data) != 0) {
             perror("pthread_create receiver");
+            cleanup_resources();
             exit(1);
         }
         //管道写入线程
         if (pthread_create(&writer_tid, NULL, writer_thread, &shared_data) != 0) {
             perror("pthread_create writer");
+            cleanup_resources();
             exit(1);
         }
         
         // (stats_thread): 监控性能和丢包情况
         if (pthread_create(&stats_tid, NULL, stats_thread, &shared_data) != 0) {
             perror("pthread_create stats");
+            cleanup_resources();
             exit(1);
         }
 
         // 创建反馈控制线程
         if (pthread_create(&feedback_tid, NULL, feedback_thread, &shared_data) != 0) {
             perror("pthread_create feedback");
+            cleanup_resources();
             exit(1);
         }
         printf("All threads started. Press Ctrl+C to exit.\n");
@@ -261,8 +393,15 @@ int main(int argc, char *argv[]) {
         pthread_join(writer_tid, NULL);
         pthread_join(stats_tid, NULL);
         pthread_join(feedback_tid, NULL);
-        close(sd);
-        close(pd[1]);
+        
+        // 清理资源
+        cleanup_resources();
+        
+        // 等待子进程结束
+        if (player_pid > 0) {
+            int status;
+            waitpid(player_pid, &status, 0);
+        }
     }
     
     return 0;
